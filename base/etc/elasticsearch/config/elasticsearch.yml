@@ -1,0 +1,6 @@
+cluster.name: "docker-cluster"
+network.host: 0.0.0.0
+# 加入跨域配置
+# http.cors.enabled: true
+# http.cors.allow-origin: "*"
+# transport.host 0.0.0.0

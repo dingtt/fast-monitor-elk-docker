@@ -1,0 +1,207 @@
+###############################################################################
+#                         Author: dingts@qq.com                               #
+###############################################################################
+version: "3.1"
+services:
+  # dm_memcached:
+  #   image: memcached:1.5-alpine
+  #   container_name: dm_memcached_container
+  #   volumes:
+  #     # 配置时区
+  #     - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
+  #   ports:
+  #     - "11211:11211"
+  dm_redis:
+    image: redis:4.0-alpine
+    container_name: dm_redis_container
+    volumes:
+      - ./base/etc/redis:/etc/redis
+      - ./log/redis:/var/log/redis
+      - ./base/var/lib/redis:/var/lib/redis
+      - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
+    # command: ['redis-server', '/etc/redis/redis.conf']
+    command:
+      - sh
+      - -c
+      - |
+        chmod 777 /var/log/redis/redis-server.log & 
+        redis-server /etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+  # dm_mongo:
+  #   image: mongo:4.0-xenial
+  #   container_name: dm_mongo_container
+  #   volumes:
+  #     - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
+  #   ports:
+  #     - "27017:27017"
+  dm_mysql_adminer:
+    image: adminer
+    container_name: dm_adminer_container
+    restart: always
+    ports:
+      - 8080:8080
+  dm_mysql:
+    image: mysql:5.7
+    container_name: dm_mysql_container
+    volumes:
+      - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
+      - ./base/etc/mysql/conf.d:/etc/mysql/conf.d
+    # 强行指定编码
+    command:
+      [
+        "mysqld",
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_general_ci",
+      ]
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      # MYSQL_USER: 'root'
+      MYSQL_PASSWORD: "xiaoyan106"
+      MYSQL_DATABASE: "monitor"
+    ports:
+      - "3306:3306"
+  nginx:
+    # restart: always
+    image: nginx
+    ports:
+      - 8091:80
+    volumes:
+      - ./log/nginx/:/var/log/nginx
+      - ./base/etc/nginx/nginx.conf:/etc/nginx/nginx.conf
+  # nginx:
+  #   restart: always
+  #   image: nginx
+  #   ports:
+  #     - 8091:80
+  #   volumes:
+  #     # - ./base/etc/nginx/conf.d/:/etc/nginx/conf.d
+  #     - ./data/frontend:/usr/share/nginx/html
+  #     # - ./static/:/static/
+  #  手动 find /var/lib/docker/overlay/ -name jvm.options
+  dm_elasticsearch:
+    image: elasticsearch:6.6.2
+    # restart: always
+    container_name: dm_elasticsearch_container
+    privileged: true
+    environment:
+      - cluster.name=docker-cluster
+      - node.name=node0
+      - node.master=true
+      - node.data=true
+      - bootstrap.memory_lock=true
+      - http.cors.enabled=true
+      - http.cors.allow-origin=*
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -XX:+UseG1GC"
+      - "discovery.zen.minimum_master_nodes=2"
+      - "discovery.zen.ping.unicast.hosts=dm_elasticsearch_container,dm_elasticsearch2_container"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./data/esdata/node0:/usr/share/elasticsearch/data
+      # - ./logs/eslogs/node0:/usr/share/elasticsearch/logs
+      # - ./base/etc/elasticsearch/jvm.options:/etc/elasticsearch/jvm.options
+      - ./base/etc/elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+    ports:
+      - "9200:9200"
+      # - "9300:9300"
+  dm_elasticsearch2:
+    image: elasticsearch:6.6.2
+    container_name: dm_elasticsearch2_container
+    privileged: true
+    environment:
+      - cluster.name=docker-cluster
+      - node.name=node1
+      - node.master=true
+      - node.data=true
+      - bootstrap.memory_lock=true
+      - http.cors.enabled=true
+      - http.cors.allow-origin=*
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -XX:+UseG1GC"
+      - "discovery.zen.minimum_master_nodes=2"
+      - "discovery.zen.ping.unicast.hosts=dm_elasticsearch_container,dm_elasticsearch2_container"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./data/esdata/node1:/usr/share/elasticsearch/data
+      # - ./logs/eslogs/node1:/usr/share/elasticsearch/logs
+      # - ./base/etc/elasticsearch/jvm.options:/etc/elasticsearch/jvm.options
+      - ./base/etc/elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+    ports:
+      - "9201:9200"
+      # - "9301:9300"
+  elasticsearch-head:
+    image: mobz/elasticsearch-head:5
+    container_name: elasticsearch-head_container
+    ports:
+      - "9100:9100"
+  logstash:
+    depends_on:
+      - dm_elasticsearch
+    volumes:
+      - ./base/etc/logstash/logstash.conf:/config/logstash.conf
+    image: logstash:6.6.2
+    restart: always
+    privileged: true
+    command: "/usr/share/logstash/bin/logstash -f /config/logstash.conf"
+  filebeat:
+    depends_on:
+      - logstash
+    image: docker.elastic.co/beats/filebeat:6.6.2
+    volumes:
+      - ./base/etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - ./log/nginx:/tmp
+  dm_kibana:
+    image: docker.elastic.co/kibana/kibana:6.6.2
+    container_name: dm_kibana_container
+    environment:
+      # 这个hosts的配置必须要跟ES的container_name相同才能访问
+      ELASTICSEARCH_HOSTS: http://dm_elasticsearch_container
+    # depends_on:
+    #   - dm_elasticsearch_container
+    restart: always
+    ports:
+      - "5601:5601"
+    volumes:
+      - ./base/etc/kibana/kibana.yml:/usr/share/kibana/config/elasticsearch.yml
+  zookeeper:
+    image: wurstmeister/zookeeper
+    restart: unless-stopped
+    # hostname: zookeeper
+    ports:
+      - "2181:2181"
+    # container_name: zookeeper
+  kafka1:
+    image: wurstmeister/kafka
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: 118.190.245.148
+      KAFKA_ADVERTISED_PORT: 9092
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_BROKER_ID: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CREATE_TOPICS: "stream-in:1:1,stream-out:1:1"
+    container_name: kafka1
+    # volumes:
+    #  - /data/product/zj_bigdata/data/kafka/docker.sock:/var/run/docker.sock
+  kafka2:
+    image: wurstmeister/kafka
+    depends_on: [zookeeper]
+    ports:
+      - "9093:9092"
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: 118.190.245.148
+      KAFKA_ADVERTISED_PORT: 9093
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_BROKER_ID: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CREATE_TOPICS: "stream-in:1:1,stream-out:1:1"
+    container_name: kafka2
+    #volumes:
+    # - /data/product/zj_bigdata/data/kafka/docker.sock:/var/run/docker.sock
