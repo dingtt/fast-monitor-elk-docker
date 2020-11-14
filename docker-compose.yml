@@ -1,11 +1,11 @@
 version: "3.1"
 services:
-  dm_redis:
+  redis:
     image: redis:4.0-alpine
-    container_name: dm_redis_container
+    container_name: redis_container
     volumes:
       - ./base/etc/redis:/etc/redis
-      - ./log/redis:/var/log/redis
+      - /var/log/redis:/var/log/redis
       - ./base/var/lib/redis:/var/lib/redis
       - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
     # command: ['redis-server', '/etc/redis/redis.conf']
@@ -24,15 +24,15 @@ services:
   #     - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
   #   ports:
   #     - "27017:27017"
-  dm_mysql_adminer:
+  mysql_adminer:
     image: adminer
-    container_name: dm_adminer_container
+    container_name: adminer_container
     restart: always
     ports:
       - 8080:8080
-  dm_mysql:
+  mysql:
     image: mysql:5.7
-    container_name: dm_mysql_container
+    container_name: mysql_container
     volumes:
       - ./base/usr/share/zoneinfo/Asia/Shanghai:/etc/localtime
       - ./base/etc/mysql/conf.d:/etc/mysql/conf.d
@@ -53,11 +53,14 @@ services:
   nginx:
     # restart: always
     image: nginx
+    container_name: dm_nginx
     ports:
       - 8091:80
     volumes:
-      - ./log/nginx/:/var/log/nginx
       - ./base/etc/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - /var/log/nginx/:/var/log/nginx
+      - ./data/frontend:/usr/share/nginx/html
+      - ./static/:/static/
   # nginx:
   #   restart: always
   #   image: nginx
@@ -65,13 +68,12 @@ services:
   #     - 8091:80
   #   volumes:
   #     # - ./base/etc/nginx/conf.d/:/etc/nginx/conf.d
-  #     - ./data/frontend:/usr/share/nginx/html
-  #     # - ./static/:/static/
+
   #  手动 find /var/lib/docker/overlay/ -name jvm.options
-  dm_elasticsearch:
+  elasticsearch:
     image: elasticsearch:6.6.2
     # restart: always
-    container_name: dm_elasticsearch_container
+    container_name: elasticsearch1_container
     privileged: true
     environment:
       - cluster.name=docker-cluster
@@ -83,7 +85,7 @@ services:
       - http.cors.allow-origin=*
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m -XX:+UseG1GC"
       - "discovery.zen.minimum_master_nodes=2"
-      - "discovery.zen.ping.unicast.hosts=dm_elasticsearch_container,dm_elasticsearch2_container"
+      - "discovery.zen.ping.unicast.hosts=elasticsearch1_container,elasticsearch2_container"
     ulimits:
       memlock:
         soft: -1
@@ -96,9 +98,9 @@ services:
     ports:
       - "9200:9200"
       # - "9300:9300"
-  dm_elasticsearch2:
+  elasticsearch2:
     image: elasticsearch:6.6.2
-    container_name: dm_elasticsearch2_container
+    container_name: elasticsearch2_container
     privileged: true
     environment:
       - cluster.name=docker-cluster
@@ -110,7 +112,7 @@ services:
       - http.cors.allow-origin=*
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m -XX:+UseG1GC"
       - "discovery.zen.minimum_master_nodes=2"
-      - "discovery.zen.ping.unicast.hosts=dm_elasticsearch_container,dm_elasticsearch2_container"
+      - "discovery.zen.ping.unicast.hosts=elasticsearch1_container,elasticsearch2_container"
     ulimits:
       memlock:
         soft: -1
@@ -130,10 +132,11 @@ services:
       - "9100:9100"
   logstash:
     depends_on:
-      - dm_elasticsearch
+      - elasticsearch
     volumes:
       - ./base/etc/logstash/logstash.conf:/config/logstash.conf
     image: logstash:6.6.2
+    container_name: dm_logstash
     restart: always
     privileged: true
     command: "/usr/share/logstash/bin/logstash -f /config/logstash.conf"
@@ -141,17 +144,18 @@ services:
     depends_on:
       - logstash
     image: docker.elastic.co/beats/filebeat:6.6.2
+    container_name: dm_filebeat
     volumes:
       - ./base/etc/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
-      - ./log/nginx:/tmp
-  dm_kibana:
+      - /var/log/nginx:/tmp
+  kibana:
     image: docker.elastic.co/kibana/kibana:6.6.2
     container_name: dm_kibana_container
     environment:
       # 这个hosts的配置必须要跟ES的container_name相同才能访问
-      ELASTICSEARCH_HOSTS: http://dm_elasticsearch_container
-    # depends_on:
-    #   - dm_elasticsearch_container
+      ELASTICSEARCH_HOSTS: http://elasticsearch1_container
+    depends_on:
+      - elasticsearch
     restart: always
     ports:
       - "5601:5601"
@@ -159,6 +163,7 @@ services:
       - ./base/etc/kibana/kibana.yml:/usr/share/kibana/config/elasticsearch.yml
   zookeeper:
     image: wurstmeister/zookeeper
+    container_name: dm_zookeeper
     restart: unless-stopped
     # hostname: zookeeper
     ports:
